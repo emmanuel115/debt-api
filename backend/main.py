@@ -1,10 +1,11 @@
-
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List
 import pandas as pd
 from pathlib import Path
-import json
+import numpy as np
+from fastapi.responses import JSONResponse
 
 
 app = FastAPI()
@@ -17,7 +18,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/api/debt/predictions/{country}")
+class DebtItem(BaseModel):
+    year: str
+    value: str
+
+
+@app.get("/api/debt/predictions/{country}", response_model=List[DebtItem])
 def get_data(country):
 
     current_dir = Path(__file__).resolve().parent
@@ -27,20 +33,13 @@ def get_data(country):
 
     countryFilter = df[df['Country Code'] == country]
     selected_cols = countryFilter.iloc[:, 23:68] 
+    itemsList = []
 
-    #selected_cols.info()
-
-    try:
-        json_str = selected_cols.to_json(orient='records', indent=4, date_format='utf-8', default_handler=str)
-    
-        #print("JSON String Output:")
-        #print(json_str)
-    except Exception as e:
-        print(f"Error converti ng DataFrame to JSON: {e}")
-
-
-    #df.info()
+    for col_name, col_data in selected_cols.items():
+        data = col_data.to_list()[0]
+        itemsList.append(DebtItem(year=col_name, value=data))
 
 #get_data('MEX');
 
-    return json_str
+    
+    return itemsList
