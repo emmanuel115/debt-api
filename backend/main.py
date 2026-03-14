@@ -1,14 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List
 import pandas as pd
-from pathlib import Path
 import numpy as np
 from fastapi.responses import JSONResponse
 import time
-from backend import debt
-
+from pathlib import Path
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+import json
+from fastapi.responses import PlainTextResponse
+from statsmodels.tsa.vector_ar.vecm import VECM
+from statsmodels.tsa.vector_ar.vecm import VECM, select_order, select_coint_rank
 
 app = FastAPI()
 
@@ -25,34 +26,47 @@ pib = "data//pib.csv"
 interes = "data//interes.csv"
 tipoc = "data//tipoc.csv"
 
-class DataItem(BaseModel):
-    year: str
-    value: str
+class Item:
+    def __init__(self, year: str, value: str):
+        self.year = year
+        self.value = value
 
-class Data2(BaseModel):
-    year: str
-    deuda: str
-    pib: str
+def sci_to_text(num):
+    #Converts a number in scientific notation to a plain string without exponent."
+    #Handles integers, floats, and strings.
+    try:
+        num_float = float(num)
+        temp = format(num_float, 'f').rstrip('0').rstrip('.') if '.' in format(num_float, 'f') else format(num_float, 'f')
+        temp = temp.split('.', 1)[0]
+        num = int(temp)
+        num = f"{num:,}"
+        return num
+    except (ValueError, TypeError):
+        raise ValueError("Input must be a number or numeric string.")
+    
+def item_to_dict(obj):
+    if isinstance(obj, Item):
+        return {
+            "year": obj.year,
+            "value": obj.value
+        }
+    raise TypeError(f"Type {type(obj)} not serializable")
 
+def getCountryData(country):
 
-@app.get("/api/debt/predictions/{country}", response_model=List[DataItem])
-def get_data(country):
-
-    start_time = time.perf_counter()
-
+    #read data from csv files - all of them
     current_dir = Path(__file__).resolve().parent
     parent_dir = current_dir.parent
     debt_path = parent_dir / debt
     pib_path = parent_dir / pib
     interes_path = parent_dir / interes
     tipoc_path = parent_dir / tipoc
-
-
     dfDebt = pd.read_csv(debt_path)
     dfPib = pd.read_csv(pib_path)
     dfInteres = pd.read_csv(interes_path)
     dfTipoc = pd.read_csv(tipoc_path)
 
+    #filter by country, filter between 1980 and 2024
     countryFilter = dfDebt[dfDebt['Country Code'] == country]
     selected_cols_debt = countryFilter.iloc[:, 23:68]
 
@@ -65,31 +79,15 @@ def get_data(country):
     countryFilter = dfTipoc[dfTipoc['Country Code'] == country]
     selected_cols_tipoc = countryFilter.iloc[:, 23:68]
 
-
-    #df_transposedDebt = selected_cols_debt.T  # or df.transpose()
-    #df_transposedDebt.columns = ['year', 'debt']
-
-    #print(df_transposedDebt.info())
-    #result = pd.merge(selected_cols_debt, selected_cols_pib)
-
-    #print(result.info())
-
-
-
-
-
+    #concat dataframes into a single one containg debt, pib, interest rate and exchange rate
     df_all = pd.concat([selected_cols_debt, selected_cols_pib, selected_cols_interes, selected_cols_tipoc], ignore_index=True)
-    #print(df_all.head(2))
 
+    #do tranpose to convert into 5 columns dataframe
     df_transposedDebt = df_all.T 
     df_transposedDebt.columns = ['deuda', 'pib', 'interes', 'tipoc']
     df_transposedDebt.insert(0, 'year', range(1980, len(df_transposedDebt) + 1980))
-    #print(df_transposedDebt.columns)
     
-    
-
-    
-
+    #if Nan values found, replace them with the mean of each variable
     deuda_medio = df_transposedDebt['deuda'].mean()
     df_transposedDebt['deuda'] = df_transposedDebt['deuda'].fillna(deuda_medio) 
     pib_medio = df_transposedDebt['pib'].mean()
@@ -99,36 +97,165 @@ def get_data(country):
     tipoc_medio = df_transposedDebt['tipoc'].mean()
     df_transposedDebt['tipoc'] = df_transposedDebt['tipoc'].fillna(tipoc_medio)
 
+    return df_transposedDebt
 
-    #print(df_transposedDebt.head(30))
+    
 
-     #df_filled = df.fillna(0)   
-    predicciones = sarimax(df_transposedDebt);
+def sarimax(df):   
+    
+    df.set_index("year", inplace=True)
+    
+    # target Variable
+    y = df["deuda"]
+    #  independant Variables - Exogeneus
+    X = df[["pib", "interes", "tipoc"]]
+    
+    # Fit SARIMAX model
+    model = SARIMAX(y, exog=X, order=(3,1,1), seasonal_order=(0,0,0,0))
+    results = model.fit(disp=False)
+
+    future_years = list(range(2027, 2041))
+    future_interes = []
+    for i in range (0, 14):
+        future_interes.append(6.6)
+    
+    future_pib = []
+    for i in range(0, 14):
+        future_pib.append(1.89e12)
+    
+    future_tipoc = []
+    for i in range(0, 14):
+        future_tipoc.append(22.4)
+    
+    future_exog = pd.DataFrame({
+        "pib": [2.0e12 + i*5e10 for i in range(len(future_years))],   # hypothetical GDP growth,
+        "interes": [5 + 0.1*i for i in range(len(future_years))],     # hypothetical interest rates,
+        "tipoc": [18 + 0.05*i for i in range(len(future_years))]      # hypothetical exchange rate,
+    }, index=future_years)
+    
+    forecast = results.get_forecast(steps=len(future_years), exog=future_exog)
+    forecast_mean = forecast.predicted_mean
+    forecast_ci = forecast.conf_int()
+    forecast_valor = forecast_mean.apply(sci_to_text)
+
+    #predicciones = pd.DataFrame({
+      #  "year": future_years,
+     #   "value": forecast_valor,
+    #}),
+
+    items_list = []
+    for i in range(len(forecast_valor)):
+        item = Item(str(future_years[i]), forecast_valor.iloc[i])
+        items_list.append(item)
+
+    json_str = json.dumps(items_list, default=item_to_dict, indent=4)
+    
+    return json_str
 
 
-    debtItemsList = []
+def vecm(df):
 
-    #for col_name, col_data in result.items():
-        #data = col_data.to_list()[0]
-        #debtItemsList.append(DataItem(year=col_name, value=data))
+    print(type(df))
+    df = df.set_index("year")
+    # Debt ratio
+    df["debt_gdp"] = df["deuda"] / df["pib"]
+
+    # Log transform exchange rate
+    df["log_exr"] = np.log(df["tipoc"])
+    data = df[["debt_gdp", "interes", "log_exr"]]
+    
+    lag_order = select_order(data, maxlags=5, deterministic="ci")
+    lags = lag_order.selected_orders["aic"]
+
+    coint_rank = select_coint_rank(
+        data,
+        det_order=0,
+        k_ar_diff=lags,
+        method="trace"
+    )
+
+    rank = coint_rank.rank
+
+    vecm = VECM(
+        data,
+        k_ar_diff=lags,
+        coint_rank=rank,
+        deterministic="ci"
+    )
+
+    vecm_res = vecm.fit()
+    steps = 2039 - data.index.max()
+    forecast = vecm_res.predict(steps=steps)
+    forecast_index = np.arange(data.index.max()+2, 2041)
+
+    forecast_df = pd.DataFrame(
+        forecast,
+        index=forecast_index,
+        columns=data.columns
+    )
+
+    gdp_forecast = []
+    last_gdp = df["pib"].iloc[-1]
+
+    for i in range(steps):
+        last_gdp = last_gdp * 1.025
+        gdp_forecast.append(last_gdp)
+
+    gdp_forecast = pd.Series(gdp_forecast, index=forecast_index)
+    forecast_df["deuda"] = forecast_df["debt_gdp"] * gdp_forecast
+
+    items_list = []
+
+    for idx, row in forecast_df.iterrows():
+        obj = Item(
+            year=idx,
+            value=row['deuda']
+        )
+        items_list.append(obj)
+
+    return json.dumps(items_list, default=item_to_dict, indent=4)
 
 
-    for prediccion in predicciones:
-        debtItemsList.append(DataItem(year=prediccion.year.to_string(index=False), value=prediccion.value.to_string(index=False)))      
+@app.get("/api/debt/predictions/sarimax/{country}", response_class=PlainTextResponse)
+def get_SarimaxPredictions(country):
 
-    #print(type(debtItemsList))
+    #measure processing time
+    start_time = time.perf_counter()
 
-    #for item in debtItemsList:
-        #print(item)
-        #print(" - ")
-        #print(item.value)
+    #Call SARIMAX function - function returns JSON string
+    sarimaxPredictions = sarimax(getCountryData(country));
 
     end_time = time.perf_counter()
-
     elapsed = end_time - start_time
-    print(f"Elapsed time: {elapsed:.6f} seconds")
+    print(f"SARIMAX Elapsed time: {elapsed:.6f} seconds")
+
+    return sarimaxPredictions
 
 
-#get_data('MEX');
+
+
+@app.get("/api/debt/predictions/vecm/{country}", response_class=PlainTextResponse)
+def get_VecmPredictions(country):
+
+    #measure processing time
+    start_time = time.perf_counter()
+
+    #Call SARIMAX function - function returns JSON string
+    vecmPredictions = vecm(getCountryData(country));
+
+    end_time = time.perf_counter()
+    elapsed = end_time - start_time
+    print(f"VECM Elapsed time: {elapsed:.6f} seconds")
+
+    return vecmPredictions
+
+
+
+
+#vecm(getCountryData('MEX'));
     
-    return debtItemsList
+    
+
+
+
+
