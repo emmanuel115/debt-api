@@ -2,5 +2,4 @@ fastapi
 uvicorn[standard]
 pandas
 numpy
-statsmodels.tsa.statespace.sarimax
-statsmodels.tsa.vector_ar.vecm
+statsmodels
