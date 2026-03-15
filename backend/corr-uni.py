@@ -1,106 +1,152 @@
 import pandas as pd
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, HTTPException
 from pathlib import Path
-import seaborn as sns
 import matplotlib.pyplot as plt
-from fastapi.responses import JSONResponse
-import io
-import base64
+import seaborn as sns
 
-app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # In production, replace "*" with your frontend URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-def getPlt():
+def getCountryData(country):
 
     debt = "data//deuda.csv"
-    pib    = "data//pib.csv"
-    interes = "data//interes.csv"
+    pobreza = "data//gini.csv"
 
-    country = 'MEX'
 
     current_dir = Path(__file__).resolve().parent
     parent_dir = current_dir.parent
     debt_path = parent_dir / debt
-    pib_path = parent_dir / pib
-    interes_path = parent_dir / interes
+    pib_path = parent_dir / pobreza
+    
+    
     dfDebt = pd.read_csv(debt_path)
-    dfPib = pd.read_csv(pib_path)
-    dfInteres = pd.read_csv(interes_path)
+    dfPobreza = pd.read_csv(pib_path)
+    
 
     #filter by country, filter between 1980 and 2024
     countryFilter = dfDebt[dfDebt['Country Code'] == country]
     selected_cols_debt = countryFilter.iloc[:, 23:68]
 
-    countryFilter = dfPib[dfPib['Country Code'] == country]
-    selected_cols_pib = countryFilter.iloc[:, 24:69]
+    countryFilter = dfPobreza[dfPobreza['Country Code'] == country]
+    selected_cols_pobreza = countryFilter.iloc[:, 24:69]
 
-    countryFilter = dfInteres[dfInteres['Country Code'] == country]
-    selected_cols_interes = countryFilter.iloc[:, 23:68]
+    #print(len(selected_cols_debt.columns))
+
+
+    if(len(selected_cols_debt.columns) != 45 or
+        len(selected_cols_debt.columns) == 0 or 
+       len(selected_cols_pobreza.columns) == 0 or 
+       (len(selected_cols_pobreza.columns) != len(selected_cols_debt.columns))):
+        print("no data")
+        return "no_data";
 
     #concat dataframes into a single one containg debt, pib, interest rate and exchange rate
-    df_all = pd.concat([selected_cols_debt, selected_cols_pib, selected_cols_interes], ignore_index=True)
+    df_all = pd.concat([selected_cols_debt, selected_cols_pobreza], ignore_index=True)
 
     #do tranpose to convert into 5 columns dataframe
     df_transposedDebt = df_all.T 
-    df_transposedDebt.columns = ['deuda', 'pib', 'interes']
+    df_transposedDebt.columns = ['deuda', 'pobreza']
     df_transposedDebt.insert(0, 'year', range(1980, len(df_transposedDebt) + 1980))
 
-    # 4. Limpiar datos (convertir Año a número y quitar nulos)
-    df_transposedDebt['year'] = pd.to_numeric(df_transposedDebt['year'], errors='coerce')
-    df_transposedDebt = df_transposedDebt.dropna()
-
-    print(df_transposedDebt.head(40))
-
-
-    print("--------------------------- Matriz correlacion ---------------------------------")
-    # 2. Calcular la matriz de correlación (Pearson)
-    matriz_corr = df_transposedDebt.corr()
-
-    # 3. Configurar y dibujar el Heatmap
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(matriz_corr, 
-            annot=True,       # Muestra los números dentro de los cuadros
-            cmap='RdBu_r',    # Escala de Rojo (positivo) a Azul (negativo)
-            center=0,         # El blanco representa correlación cero
-            fmt=".2f",        # Dos decimales
-            linewidths=2,     # Espacio entre celdas
-            square=True)      # Celdas cuadradas
-
-    plt.title('Mapa de Correlación: PIB, Deuda y Tasas en México', fontsize=14)
+    null_percentage = df_transposedDebt.isnull().mean() * 100
+    #print("Percentage of null values per column:")
+    null_percentage = null_percentage.round(2)
+    #print(type(null_percentage))
+    #print(null_percentage)
+    for value in null_percentage:
+        if(value > 60):
+            return "mo_data_low_per";
+        
     
-    return plt
+    
+    #if Nan values found, replace them with the mean of each variable
+    deuda_medio = df_transposedDebt['deuda'].mean()
+    df_transposedDebt['deuda'] = df_transposedDebt['deuda'].fillna(deuda_medio) 
+    pobreza_medio = df_transposedDebt['pobreza'].mean()
+    df_transposedDebt['pobreza'] = df_transposedDebt['pobreza'].fillna(pobreza_medio)
+
+
+    #print(df_transposedDebt.head(40))
+    return df_transposedDebt
 
 
 
 
 
-@app.get("/plot-json")
-def get_plot_json():
 
-    plt = getPlt();
-    try:
-        # Create a simple Matplotlib plot
-        fig = plt.subplots()
 
-        # Save plot to a BytesIO buffer
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight")
-        plt.close(fig)  # Free memory
-        buf.seek(0)
+country = 'MEX'
 
-        # Encode image to Base64 string
-        img_base64 = base64.b64encode(buf.read()).decode("utf-8")
 
-        # Return JSON with Base64 image
-        return JSONResponse(content={"image_base64": img_base64})
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def seabornPlot(df):
+
+    sns.regplot(x=df['deuda'], y=df['pobreza'])
+    plt.title("Correlation between column1 and column2")
+    plt.show()
+
+
+def scatterPlot(df):
+    plt.scatter(df['deuda'], df['pobreza'])
+    plt.xlabel('deuda')
+    plt.ylabel('pobreza')
+    plt.title('Correlation between deuda and column2')
+    plt.show()
+
+
+def plotCorrelation(df):
+
+    numeric_df = df.select_dtypes(include=['number'])
+    if numeric_df.empty:
+        raise ValueError("No numeric columns found for correlation calculation.")
+    
+    # Calculate correlation matrix (Pearson by default)
+    pearson_corr = numeric_df.corr(method='pearson')
+    kendall_corr = numeric_df.corr(method='kendall')
+    spearman_corr = numeric_df.corr(method='spearman')
+
+    # Display results
+    print("DataFrame:")
+    print(df, "\n")
+
+    print("Pearson Correlation:\n", pearson_corr, "\n")
+    print("Kendall Correlation:\n", kendall_corr, "\n")
+    print("Spearman Correlation:\n", spearman_corr)
+
+    plt.scatter(
+        df['deuda'],
+        df['pobreza'],
+        color='blue',
+        alpha=0.6,
+        s=40
+    )
+    plt.xlabel('Deuda')
+    plt.ylabel('Pobreza')
+    plt.title('Deuda vs Pobreza')
+
+
+
+    
+
+
+result = getCountryData(country);
+if (isinstance(result, str)):
+    print(result)
+else:
+    print(result.head(20))
+    print("-------------------------- PLOT -----------------------------")
+    #seabornPlot(result)
+    plotCorrelation(result)
+    
+
+
+#df = pd.read_csv(debt_path)
+#non_null_counts = df.count()
+
+#print("Non-null counts per column:")
+#print(non_null_counts)
+
+#df = pd.read_csv(pobreza_path)
+#non_null_counts = df.count()
+
+#print("Non-null counts per column:")
+
+#print(non_null_counts)
+
