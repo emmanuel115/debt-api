@@ -43,6 +43,12 @@ class CorrUniResponse(BaseModel):
     message: str
     imageBase64: str
 
+class DebtResponse(BaseModel):
+    code: int
+    model: str
+    message: str
+    result: str
+
 
 corrType = {
     "gini": "Indice Gini",
@@ -243,10 +249,8 @@ def sarimax(df):
     for i in range(len(forecast_valor)):
         item = Item(str(future_years[i]), forecast_valor.iloc[i])
         items_list.append(item)
-
-    json_str = json.dumps(items_list, default=item_to_dict, indent=4)
     
-    return json_str
+    return json.dumps(items_list, default=item_to_dict, indent=4)
 
 
 def vecm(df):
@@ -382,38 +386,66 @@ def regPlot(df):
     return plt
 
 
-@app.get("/api/debt/predictions/sarimax/{country}", response_class=PlainTextResponse)
+@app.get("/api/debt/predictions/sarimax/{country}", response_model=DebtResponse)
 def get_SarimaxPredictions(country):
 
-    #measure processing time
-    start_time = time.perf_counter()
+    try:
+        #measure processing time
+        start_time = time.perf_counter()
 
-    #Call SARIMAX function - function returns JSON string
-    sarimaxPredictions = sarimax(getCountryData(country));
+        #Call SARIMAX function - function returns JSON string
+        sarimaxPredictions = sarimax(getCountryData(country));
 
-    end_time = time.perf_counter()
-    elapsed = end_time - start_time
-    print(f"SARIMAX Elapsed time: {elapsed:.6f} seconds")
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+        print(f"SARIMAX Elapsed time: {elapsed:.6f} seconds")
+    except BaseException(e):
+        print(e);
+        return DebtResponse(
+            code=-1,
+            model="Sarimax",
+            message="Error",
+            result=""
+        )
 
-    return sarimaxPredictions
+    return DebtResponse(
+        code=1,
+        model="Sarimax",
+        message="Success",
+        result=sarimaxPredictions
+    )
 
 
 
 
-@app.get("/api/debt/predictions/vecm/{country}", response_class=PlainTextResponse)
+@app.get("/api/debt/predictions/vecm/{country}", response_model=DebtResponse)
 def get_VecmPredictions(country):
 
-    #measure processing time
-    start_time = time.perf_counter()
+    try:
+        #measure processing time
+        start_time = time.perf_counter()
 
-    #Call SARIMAX function - function returns JSON string
-    vecmPredictions = vecm(getCountryData(country));
+        #Call SARIMAX function - function returns JSON string
+        vecmPredictions = vecm(getCountryData(country));
 
-    end_time = time.perf_counter()
-    elapsed = end_time - start_time
-    print(f"VECM Elapsed time: {elapsed:.6f} seconds")
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+        print(f"VECM Elapsed time: {elapsed:.6f} seconds")
+    except BaseException(e):
+        print(e)
+        return DebtResponse(
+            code=-1,
+            model="Vecm",
+            message="Error",
+            result=""
+        )
 
-    return vecmPredictions
+    return DebtResponse(
+        code=1,
+        model="Vecm",
+        message="Success",
+        result=vecmPredictions
+    )
 
 
 @app.get("/api/debt/corrm/{country}")
