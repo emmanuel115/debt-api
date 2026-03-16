@@ -2,12 +2,13 @@ import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 
 
-def getCountryData(country):
+def getCorrUniCountryData(country, indicator):
 
     debt = "data//deuda.csv"
-    pobreza = "data//gini.csv"
+    pobreza = "data//" + indicator + ".csv"
 
 
     current_dir = Path(__file__).resolve().parent
@@ -19,31 +20,68 @@ def getCountryData(country):
     dfDebt = pd.read_csv(debt_path)
     dfPobreza = pd.read_csv(pib_path)
     
+    min = 0
+    initiYear = 1980
+
+    yearsD = any;
+    yearsP = any;
+    if(indicator == "tugurios" or
+       indicator == "consumomedio"):
+        yearsD = np.r_[1,43:66].copy()
+        yearsP = np.r_[1,42:65].copy()
+        min = 23
+        initiYear = 2000
+    else:
+        yearsD = np.r_[1,23:68].copy()
+        yearsP = np.r_[1,24:69].copy()
+        initiYear = 1980
+        min = 45
+
 
     #filter by country, filter between 1980 and 2024
     countryFilter = dfDebt[dfDebt['Country Code'] == country]
-    selected_cols_debt = countryFilter.iloc[:, 23:68]
+    selected_cols_debt = countryFilter.iloc[:, yearsD]
 
     countryFilter = dfPobreza[dfPobreza['Country Code'] == country]
-    selected_cols_pobreza = countryFilter.iloc[:, 24:69]
+    selected_cols_pobreza = countryFilter.iloc[:, yearsP]
 
-    #print(len(selected_cols_debt.columns))
+    print(len(selected_cols_debt.columns))
+    print(len(selected_cols_pobreza.columns))
 
+    selected_cols_debt = selected_cols_debt.drop('Country Code', axis=1)
+    selected_cols_pobreza = selected_cols_pobreza.drop('Country Code', axis=1)
 
-    if(len(selected_cols_debt.columns) != 45 or
+    #dfT1 = selected_cols_debt.T
+    #print(dfT1.head(50))
+
+    #print(selected_cols_debt)
+    #print(selected_cols_pobreza)
+
+    if(len(selected_cols_debt.columns) != min or
         len(selected_cols_debt.columns) == 0 or 
        len(selected_cols_pobreza.columns) == 0 or 
        (len(selected_cols_pobreza.columns) != len(selected_cols_debt.columns))):
         print("no data")
-        return "no_data";
+        return "no_data_found";
 
     #concat dataframes into a single one containg debt, pib, interest rate and exchange rate
     df_all = pd.concat([selected_cols_debt, selected_cols_pobreza], ignore_index=True)
 
+    #print(df_all)
+    
+
     #do tranpose to convert into 5 columns dataframe
     df_transposedDebt = df_all.T 
+    #print(df_transposedDebt)
     df_transposedDebt.columns = ['deuda', 'pobreza']
-    df_transposedDebt.insert(0, 'year', range(1980, len(df_transposedDebt) + 1980))
+    
+    #df_transposedDebt = df_transposedDebt.drop('Country Code', axis=1)
+    #print(df_transposedDebt)
+    df_transposedDebt.insert(0, 'year', range(initiYear, len(df_transposedDebt) + initiYear))
+
+    #print(df_transposedDebt.head(50))
+
+    
 
     null_percentage = df_transposedDebt.isnull().mean() * 100
     #print("Percentage of null values per column:")
@@ -62,7 +100,6 @@ def getCountryData(country):
     pobreza_medio = df_transposedDebt['pobreza'].mean()
     df_transposedDebt['pobreza'] = df_transposedDebt['pobreza'].fillna(pobreza_medio)
 
-
     #print(df_transposedDebt.head(40))
     return df_transposedDebt
 
@@ -72,7 +109,7 @@ def getCountryData(country):
 
 
 
-country = 'MEX'
+
 
 
 
@@ -120,20 +157,35 @@ def plotCorrelation(df):
     plt.xlabel('Deuda')
     plt.ylabel('Pobreza')
     plt.title('Deuda vs Pobreza')
+    plt.show()
+
+
+def regPlot(df):
+    sns.regplot(
+        x='deuda',
+        y='pobreza',
+        data=df
+    )
+
+    plt.title('Deuda Internacional vs Pobreza')
+    plt.xlabel('Deuda')
+    plt.ylabel('Pobreza')
+    plt.show()
 
 
 
+country = 'ARG'
+indicator = "gini"
     
-
-
-result = getCountryData(country);
+result = getCorrUniCountryData(country, indicator);
 if (isinstance(result, str)):
     print(result)
 else:
     print(result.head(20))
     print("-------------------------- PLOT -----------------------------")
     #seabornPlot(result)
-    plotCorrelation(result)
+    #plotCorrelation(result)
+    regPlot(result)
     
 
 

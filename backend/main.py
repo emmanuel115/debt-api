@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from fastapi.responses import JSONResponse
 import io
 import base64
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -35,6 +36,22 @@ class Item:
     def __init__(self, year: str, value: str):
         self.year = year
         self.value = value
+
+class CorrUniResponse(BaseModel):
+    code: int
+    corrType: str
+    message: str
+    imageBase64: str
+
+
+corrType = {
+    "gini": "Indice Gini",
+    "tugurios": "Poblacion viviendo en barrios de tugurios",
+    "brecha3": "Brecha de Pobreza 3 USD al dia",
+    "brecha420": "Brecha de Pobreza 4.20 USD al dia",
+    "consumomedio": "Consumo medio o ingresos per capita segn encuestas"
+}
+
 
 def sci_to_text(num):
     #Converts a number in scientific notation to a plain string without exponent."
@@ -84,6 +101,12 @@ def getCountryData(country):
     countryFilter = dfTipoc[dfTipoc['Country Code'] == country]
     selected_cols_tipoc = countryFilter.iloc[:, 24:69]
 
+    if(len(selected_cols_debt) == len(selected_cols_pib) and
+       len(selected_cols_pib) == len(selected_cols_interes) and
+       len(selected_cols_interes) == len(selected_cols_tipoc)):
+        print("debt dataframes length is the same");
+    
+
     #concat dataframes into a single one containg debt, pib, interest rate and exchange rate
     df_all = pd.concat([selected_cols_debt, selected_cols_pib, selected_cols_interes, selected_cols_tipoc], ignore_index=True)
 
@@ -104,10 +127,78 @@ def getCountryData(country):
 
     return df_transposedDebt
 
+
+
+def getCorrUniCountryData(country, indicator):
+
+    debt = "data//deuda.csv"
+    pobreza = "data//" + indicator + ".csv"
+    current_dir = Path(__file__).resolve().parent
+    parent_dir = current_dir.parent
+    debt_path = parent_dir / debt
+    pib_path = parent_dir / pobreza
+    dfDebt = pd.read_csv(debt_path)
+    dfPobreza = pd.read_csv(pib_path)
+    
+    min = 0
+    initiYear = 1980
+
+    yearsD = any;
+    yearsP = any;
+    if(indicator == "tugurios" or
+       indicator == "consumomedio"):
+        yearsD = np.r_[1,43:66].copy()
+        yearsP = np.r_[1,42:65].copy()
+        min = 23
+        initiYear = 2000
+    else:
+        yearsD = np.r_[1,23:68].copy()
+        yearsP = np.r_[1,24:69].copy()
+        initiYear = 1980
+        min = 45
+
+
+    countryFilter = dfDebt[dfDebt['Country Code'] == country]
+    selected_cols_debt = countryFilter.iloc[:, yearsD]
+    countryFilter = dfPobreza[dfPobreza['Country Code'] == country]
+    selected_cols_pobreza = countryFilter.iloc[:, yearsP]
+
+    selected_cols_debt = selected_cols_debt.drop('Country Code', axis=1)
+    selected_cols_pobreza = selected_cols_pobreza.drop('Country Code', axis=1)
+
+    if(len(selected_cols_debt.columns) != min or
+        len(selected_cols_debt.columns) == 0 or 
+       len(selected_cols_pobreza.columns) == 0 or 
+       (len(selected_cols_pobreza.columns) != len(selected_cols_debt.columns))):
+        print("no data")
+        return "no_data_found";
+
+    df_all = pd.concat([selected_cols_debt, selected_cols_pobreza], ignore_index=True)
+    df_transposedDebt = df_all.T 
+    df_transposedDebt.columns = ['deuda', 'pobreza']
+    df_transposedDebt.insert(0, 'year', range(initiYear, len(df_transposedDebt) + initiYear))
+
+    null_percentage = df_transposedDebt.isnull().mean() * 100
+    null_percentage = null_percentage.round(2)
+    for value in null_percentage:
+        if(value > 60):
+            return "no_data_low_per";
+            
+    #if Nan values found, replace them with the mean of each variable
+    deuda_medio = df_transposedDebt['deuda'].mean()
+    df_transposedDebt['deuda'] = df_transposedDebt['deuda'].fillna(deuda_medio) 
+    pobreza_medio = df_transposedDebt['pobreza'].mean()
+    df_transposedDebt['pobreza'] = df_transposedDebt['pobreza'].fillna(pobreza_medio)
+
+    return df_transposedDebt
     
 
 def sarimax(df):   
     
+    print("-------------------------------------------- sarimax ----------------------------------------------")
+    print(df.head(50))
+    print("NaN count per column:")
+    print(df.isna().sum())
     df.set_index("year", inplace=True)
     
     # target Variable
@@ -275,6 +366,22 @@ def getPlt(country):
     
     return plt
 
+
+
+def regPlot(df):
+    sns.regplot(
+        x='deuda',
+        y='pobreza',
+        data=df
+    )
+
+    plt.title('Deuda Internacional vs Pobreza')
+    plt.xlabel('Deuda')
+    plt.ylabel('Pobreza')
+
+    return plt
+
+
 @app.get("/api/debt/predictions/sarimax/{country}", response_class=PlainTextResponse)
 def get_SarimaxPredictions(country):
 
@@ -332,6 +439,52 @@ def get_plot_json(country):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+@app.get("/api/debt/corruni/{indicator}/{country}", response_model=CorrUniResponse)
+def get_cor_uni(indicator, country):
+
+    try:
+
+        print(" en el api, corrtype: " + corrType[indicator])
+        print(type(corrType[indicator]))
+        result = getCorrUniCountryData(country, indicator);
+        if (isinstance(result, str)):
+            print(result)
+
+        else:
+            print(result)
+            plt = regPlot(result)
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png")
+            plt.close()
+            buf.seek(0)
+
+            # Encode image to Base64 string
+            img_base64 = base64.b64encode(buf.read()).decode("utf-8")
+            print("corr uni image generated")
+            print(type(img_base64))
+            return CorrUniResponse (
+                code=1,
+                corrType = corrType[indicator],
+                message = "",
+                imageBase64 = img_base64           
+            )
+    except BaseException as e:
+        print(e)
+        return CorrUniResponse (
+                code=-1,
+                corrType = corrType[indicator],
+                message = "Error",
+                imageBase64 = ""           
+            )
+    
+    return CorrUniResponse (
+                code=0,
+                corrType = corrType[indicator],
+                message = result,
+                imageBase64 = result           
+            )
 
 #vecm(getCountryData('MEX'));
     
