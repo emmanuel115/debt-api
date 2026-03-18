@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 import io
 import base64
 from pydantic import BaseModel
+import traceback
 
 app = FastAPI()
 
@@ -98,6 +99,8 @@ def getCountryData(country):
     countryFilter = dfDebt[dfDebt['Country Code'] == country]
     selected_cols_debt = countryFilter.iloc[:, 23:68]
 
+    print(len(selected_cols_debt))
+
     countryFilter = dfPib[dfPib['Country Code'] == country]
     selected_cols_pib = countryFilter.iloc[:, 24:69]
 
@@ -120,8 +123,17 @@ def getCountryData(country):
     df_transposedDebt = df_all.T 
     df_transposedDebt.columns = ['deuda', 'pib', 'interes', 'tipoc']
     df_transposedDebt.insert(0, 'year', range(1980, len(df_transposedDebt) + 1980))
+
+    if((df_transposedDebt['deuda'].isnull().sum()) > 1):
+        return "no_debt_data"
     
-    #if Nan values found, replace them with the mean of each variable
+    null_percentage = df_transposedDebt.isnull().mean() * 100
+    null_percentage = null_percentage.round(2)
+    for value in null_percentage:
+        if(value > 60):
+            return "no_data_low_per"
+    
+    #if Nan values found, replace them with the mean of each variable, mean here is calculated out of non null values already
     deuda_medio = df_transposedDebt['deuda'].mean()
     df_transposedDebt['deuda'] = df_transposedDebt['deuda'].fillna(deuda_medio) 
     pib_medio = df_transposedDebt['pib'].mean()
@@ -137,64 +149,68 @@ def getCountryData(country):
 
 def getCorrUniCountryData(country, indicator):
 
-    debt = "data//deuda.csv"
-    pobreza = "data//" + indicator + ".csv"
-    current_dir = Path(__file__).resolve().parent
-    parent_dir = current_dir.parent
-    debt_path = parent_dir / debt
-    pib_path = parent_dir / pobreza
-    dfDebt = pd.read_csv(debt_path)
-    dfPobreza = pd.read_csv(pib_path)
+    try:
+        debt = "data//deuda.csv"
+        pobreza = "data//" + indicator + ".csv"
+        current_dir = Path(__file__).resolve().parent
+        parent_dir = current_dir.parent
+        debt_path = parent_dir / debt
+        pib_path = parent_dir / pobreza
+        dfDebt = pd.read_csv(debt_path)
+        dfPobreza = pd.read_csv(pib_path)
     
-    min = 0
-    initiYear = 1980
-
-    yearsD = any;
-    yearsP = any;
-    if(indicator == "tugurios" or
-       indicator == "consumomedio"):
-        yearsD = np.r_[1,43:66].copy()
-        yearsP = np.r_[1,42:65].copy()
-        min = 23
-        initiYear = 2000
-    else:
-        yearsD = np.r_[1,23:68].copy()
-        yearsP = np.r_[1,24:69].copy()
+        min = 0
         initiYear = 1980
-        min = 45
+
+        yearsD = any
+        yearsP = any
+        if(indicator == "tugurios" or
+            indicator == "consumomedio"):
+                yearsD = np.r_[1,43:66].copy()
+                yearsP = np.r_[1,42:65].copy()
+                min = 23
+                initiYear = 2000
+        else:
+            yearsD = np.r_[1,23:68].copy()
+            yearsP = np.r_[1,24:69].copy()
+            initiYear = 1980
+            min = 45
 
 
-    countryFilter = dfDebt[dfDebt['Country Code'] == country]
-    selected_cols_debt = countryFilter.iloc[:, yearsD]
-    countryFilter = dfPobreza[dfPobreza['Country Code'] == country]
-    selected_cols_pobreza = countryFilter.iloc[:, yearsP]
+        countryFilter = dfDebt[dfDebt['Country Code'] == country]
+        selected_cols_debt = countryFilter.iloc[:, yearsD]
+        countryFilter = dfPobreza[dfPobreza['Country Code'] == country]
+        selected_cols_pobreza = countryFilter.iloc[:, yearsP]
 
-    selected_cols_debt = selected_cols_debt.drop('Country Code', axis=1)
-    selected_cols_pobreza = selected_cols_pobreza.drop('Country Code', axis=1)
+        selected_cols_debt = selected_cols_debt.drop('Country Code', axis=1)
+        selected_cols_pobreza = selected_cols_pobreza.drop('Country Code', axis=1)
 
-    if(len(selected_cols_debt.columns) != min or
-        len(selected_cols_debt.columns) == 0 or 
-       len(selected_cols_pobreza.columns) == 0 or 
-       (len(selected_cols_pobreza.columns) != len(selected_cols_debt.columns))):
-        print("no data")
-        return "no_data_found";
+        if(len(selected_cols_debt.columns) != min or
+            len(selected_cols_debt.columns) == 0 or 
+            len(selected_cols_pobreza.columns) == 0 or 
+            (len(selected_cols_pobreza.columns) != len(selected_cols_debt.columns))):
+                print("no data")
+                return "no_data_found"
 
-    df_all = pd.concat([selected_cols_debt, selected_cols_pobreza], ignore_index=True)
-    df_transposedDebt = df_all.T 
-    df_transposedDebt.columns = ['deuda', 'pobreza']
-    df_transposedDebt.insert(0, 'year', range(initiYear, len(df_transposedDebt) + initiYear))
+        df_all = pd.concat([selected_cols_debt, selected_cols_pobreza], ignore_index=True)
+        df_transposedDebt = df_all.T 
+        df_transposedDebt.columns = ['deuda', 'pobreza']
+        df_transposedDebt.insert(0, 'year', range(initiYear, len(df_transposedDebt) + initiYear))
 
-    null_percentage = df_transposedDebt.isnull().mean() * 100
-    null_percentage = null_percentage.round(2)
-    for value in null_percentage:
-        if(value > 60):
-            return "no_data_low_per";
+        null_percentage = df_transposedDebt.isnull().mean() * 100
+        null_percentage = null_percentage.round(2)
+        for value in null_percentage:
+            if(value > 60):
+                return "no_data_low_per"
             
-    #if Nan values found, replace them with the mean of each variable
-    deuda_medio = df_transposedDebt['deuda'].mean()
-    df_transposedDebt['deuda'] = df_transposedDebt['deuda'].fillna(deuda_medio) 
-    pobreza_medio = df_transposedDebt['pobreza'].mean()
-    df_transposedDebt['pobreza'] = df_transposedDebt['pobreza'].fillna(pobreza_medio)
+        #if Nan values found, replace them with the mean of each variable
+        deuda_medio = df_transposedDebt['deuda'].mean()
+        df_transposedDebt['deuda'] = df_transposedDebt['deuda'].fillna(deuda_medio) 
+        pobreza_medio = df_transposedDebt['pobreza'].mean()
+        df_transposedDebt['pobreza'] = df_transposedDebt['pobreza'].fillna(pobreza_medio)
+    except BaseException as e:
+        print("An error has occurred when doing univariable correlation")
+        traceback.print_exc()
 
     return df_transposedDebt
     
@@ -255,7 +271,7 @@ def sarimax(df):
 
 def vecm(df):
 
-    print(type(df))
+    #print(type(df))
     df = df.set_index("year")
     # Debt ratio
     df["debt_gdp"] = df["deuda"] / df["pib"]
@@ -337,6 +353,9 @@ def getPlt(country):
     countryFilter = dfInteres[dfInteres['Country Code'] == country]
     selected_cols_interes = countryFilter.iloc[:, 23:68]
 
+    if(len(selected_cols_debt.columns) < 30 or len(selected_cols_pib.columns) < 30 or len(selected_cols_interes.columns) < 30):
+        return "no_data"
+
     #concat dataframes into a single one containg debt, pib, interest rate and exchange rate
     df_all = pd.concat([selected_cols_debt, selected_cols_pib, selected_cols_interes], ignore_index=True)
 
@@ -344,6 +363,12 @@ def getPlt(country):
     df_transposedDebt = df_all.T 
     df_transposedDebt.columns = ['deuda', 'pib', 'interes']
     df_transposedDebt.insert(0, 'year', range(1980, len(df_transposedDebt) + 1980))
+
+    null_percentage = df_transposedDebt.isnull().mean() * 100
+    null_percentage = null_percentage.round(2)
+    for value in null_percentage:
+        if(value > 60):
+            return "no_data_low_per"
 
     # 4. Limpiar datos (convertir Año a número y quitar nulos)
     df_transposedDebt['year'] = pd.to_numeric(df_transposedDebt['year'], errors='coerce')
@@ -392,15 +417,39 @@ def get_SarimaxPredictions(country):
     try:
         #measure processing time
         start_time = time.perf_counter()
+        response: DebtResponse
 
         #Call SARIMAX function - function returns JSON string
-        sarimaxPredictions = sarimax(getCountryData(country));
-
+        result = getCountryData(country)
+        
         end_time = time.perf_counter()
         elapsed = end_time - start_time
         print(f"SARIMAX Elapsed time: {elapsed:.6f} seconds")
-    except BaseException(e):
-        print(e);
+        
+        if(isinstance(result, str)):
+            #not enough data
+            response = DebtResponse(
+                code=0,
+                model="Sarimax",
+                message=result,
+                result=""
+            )
+        else:
+            sarimaxPredictions = sarimax(result)
+            response = DebtResponse(
+                code=1,
+                model="Sarimax",
+                message="Success",
+                result= sarimaxPredictions
+            )
+        
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+        print(f"SARIMAX Elapsed time: {elapsed:.6f} seconds")
+        
+    except BaseException as e:
+        print("An error has occurred while doing SARIMAX: ")
+        traceback.print_exc()
         return DebtResponse(
             code=-1,
             model="Sarimax",
@@ -408,12 +457,7 @@ def get_SarimaxPredictions(country):
             result=""
         )
 
-    return DebtResponse(
-        code=1,
-        model="Sarimax",
-        message="Success",
-        result=sarimaxPredictions
-    )
+    return response
 
 
 
@@ -424,15 +468,39 @@ def get_VecmPredictions(country):
     try:
         #measure processing time
         start_time = time.perf_counter()
+        response: DebtResponse
 
         #Call SARIMAX function - function returns JSON string
-        vecmPredictions = vecm(getCountryData(country));
+        result = getCountryData(country)
 
         end_time = time.perf_counter()
         elapsed = end_time - start_time
         print(f"VECM Elapsed time: {elapsed:.6f} seconds")
-    except BaseException(e):
-        print(e)
+
+        if(isinstance(result, str)):
+            #not enough data
+            response = DebtResponse(
+                code=0,
+                model="Vecm",
+                message=result,
+                result=""
+            )
+        else:
+            vecmPredictions = vecm(result)
+            response = DebtResponse(
+                code=0,
+                model="VECM",
+                message="Success",
+                result=vecmPredictions
+            )
+
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+        print(f"VECM Elapsed time: {elapsed:.6f} seconds")
+        
+    except BaseException as e:
+        print("An error has occurred while doing VECM: ")
+        traceback.print_exc()
         return DebtResponse(
             code=-1,
             model="Vecm",
@@ -440,19 +508,16 @@ def get_VecmPredictions(country):
             result=""
         )
 
-    return DebtResponse(
-        code=1,
-        model="Vecm",
-        message="Success",
-        result=vecmPredictions
-    )
+    return response
 
 
 @app.get("/api/debt/corrm/{country}")
-def get_plot_json(country):
+def get_corr_multi(country):
 
-    plt = getPlt(country);
     try:
+        plt = getPlt(country)
+        if(isinstance(plt, str)):
+            return "NO_DATA"
         # Create a simple Matplotlib plot
         #fig = plt.subplots()
 
@@ -469,7 +534,10 @@ def get_plot_json(country):
         return JSONResponse(content={"imageBase64": img_base64})
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("An error has occurred while doing multi correlation: ")
+        traceback.print_exc()
+        #raise HTTPException(status_code=500, detail=str(e))
+        return "Error"
 
 
 
@@ -478,8 +546,8 @@ def get_cor_uni(indicator, country):
 
     try:
 
-        print(" en el api, corrtype: " + corrType[indicator])
-        print(type(corrType[indicator]))
+        #print(" en el api, corrtype: " + corrType[indicator])
+        #print(type(corrType[indicator]))
         result = getCorrUniCountryData(country, indicator);
         if (isinstance(result, str)):
             print(result)
@@ -503,7 +571,8 @@ def get_cor_uni(indicator, country):
                 imageBase64 = img_base64           
             )
     except BaseException as e:
-        print(e)
+        print("An error has occurred while doing uni correlation: ")
+        traceback.print_exc()
         return CorrUniResponse (
                 code=-1,
                 corrType = corrType[indicator],
